@@ -103,129 +103,93 @@ async function scrapeInstagramPost() {
         await page.goto('https://www.instagram.com/faire_wholesale/?hl=en', { waitUntil: 'networkidle0' });
         await setTimeout(randomDelay(3, 5));
 
-        // Wait for content to load with increased timeout
         console.log('Waiting for content to load...');
         
-        // Try multiple selectors for posts with longer timeout
-        const contentSelectors = [
-            '_aagv',  // Instagram's post grid class
-            'article div[style*="padding-bottom: 100%"]', // Post container
-            '._aabd._aa8k._al3l',  // Another common Instagram post container class
-            '._ab6k._ab6l._ab6m', // Profile content container
-            '[role="tablist"] + div article' // Posts after the tabs
-        ];
-
-        let contentFound = false;
-        for (const selector of contentSelectors) {
-            try {
-                await page.waitForSelector(selector, { timeout: 15000 });
-                console.log(`Content found using selector: ${selector}`);
-                contentFound = true;
-                break;
-            } catch (error) {
-                console.log(`Selector ${selector} not found, trying next...`);
-            }
-        }
-
-        if (!contentFound) {
-            throw new Error('Could not find any posts on the profile');
-        }
-
-        // Scroll to trigger lazy loading
-        console.log('Scrolling to load more content...');
+        // Scroll to ensure content is loaded
+        console.log('Scrolling to load content...');
         await page.evaluate(() => {
             window.scrollBy(0, 1000);
             return new Promise((resolve) => setTimeout(resolve, 1000));
         });
         await setTimeout(randomDelay(2, 3));
 
-        // Try different selectors for posts
-        const postSelectors = [
-            'a[href*="/p/"]',
-            '._aagv',
-            'article a[role="link"]',
-            '._aabd._aa8k._al3l a',
-            'article div[style*="padding-bottom: 100%"] a'
-        ];
+        // Find posts using href pattern
+        console.log('Looking for posts...');
+        const posts = await page.evaluate(() => {
+            const postLinks = Array.from(document.querySelectorAll('a[href*="/p/"]'))
+                .filter(a => {
+                    // Match pattern /faire_wholesale/p/XXXXXXXX/ where X is any character
+                    const pattern = /\/faire_wholesale\/p\/[A-Za-z0-9_-]+\//;
+                    return pattern.test(a.getAttribute('href'));
+                })
+                .map(a => ({
+                    href: a.getAttribute('href'),
+                    position: a.getBoundingClientRect()
+                }));
+            return postLinks;
+        });
 
-        let firstPost = null;
-        for (const selector of postSelectors) {
-            try {
-                const posts = await page.$$(selector);
-                if (posts.length > 0) {
-                    firstPost = posts[0];
-                    console.log(`Found post using selector: ${selector}`);
-                    break;
-                }
-            } catch (error) {
-                console.log(`Error with selector ${selector}: ${error.message}`);
-            }
-        }
+        console.log(`Found ${posts.length} posts`);
 
-        if (firstPost) {
-            console.log('Post found, clicking...');
+        if (posts.length > 0) {
+            const firstPost = posts[0];
+            console.log('Post found:', firstPost.href);
             
-            // Make sure the post is in view
-            await firstPost.evaluate(element => {
-                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            });
+            // Click the post
+            await page.evaluate((postHref) => {
+                const link = document.querySelector(`a[href="${postHref}"]`);
+                if (link) {
+                    link.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, firstPost.href);
+            
             await setTimeout(randomDelay(1, 2));
 
-            const box = await firstPost.boundingBox();
-            if (!box) {
-                throw new Error('Could not get post position');
-            }
-
-            await page.mouse.move(box.x + box.width/2, box.y + box.height/2, { steps: 20 });
-            await setTimeout(randomDelay(0.3, 0.7));
-            
-            // Click with better error handling
             try {
+                // Click using the href directly
                 await Promise.all([
                     page.waitForSelector('article[role="presentation"]', { timeout: 8000 }),
-                    firstPost.click()
+                    page.click(`a[href="${firstPost.href}"]`)
                 ]);
+                
+                await setTimeout(randomDelay(2, 4));
+
+                console.log('Extracting data...');
+                const postData = await page.evaluate(() => {
+                    const data = {
+                        email: '',
+                        handle: '',
+                        website: ''
+                    };
+
+                    const postText = document.querySelector('article')?.textContent || '';
+                    const emailMatch = postText.match(/[\w.-]+@[\w.-]+\.\w+/);
+                    if (emailMatch) {
+                        data.email = emailMatch[0];
+                    }
+
+                    const handleElement = document.querySelector('article header a');
+                    if (handleElement) {
+                        data.handle = handleElement.textContent;
+                    }
+
+                    const links = Array.from(document.querySelectorAll('a')).map(a => a.href);
+                    const websiteLink = links.find(link => 
+                        link.startsWith('http') && 
+                        !link.includes('instagram.com') && 
+                        !link.includes('facebook.com')
+                    );
+                    if (websiteLink) {
+                        data.website = websiteLink;
+                    }
+
+                    return data;
+                });
+
+                console.log('Extracted Data:', postData);
             } catch (error) {
-                console.log('First click attempt failed, trying alternative method...');
-                await firstPost.click({ delay: 100 });
-                await page.waitForSelector('article[role="presentation"]', { timeout: 8000 });
+                console.error('Error occurred:', error);
             }
-            
-            await setTimeout(randomDelay(2, 4));
-
-            console.log('Extracting data...');
-            const postData = await page.evaluate(() => {
-                const data = {
-                    email: '',
-                    handle: '',
-                    website: ''
-                };
-
-                const postText = document.querySelector('article')?.textContent || '';
-                const emailMatch = postText.match(/[\w.-]+@[\w.-]+\.\w+/);
-                if (emailMatch) {
-                    data.email = emailMatch[0];
-                }
-
-                const handleElement = document.querySelector('article header a');
-                if (handleElement) {
-                    data.handle = handleElement.textContent;
-                }
-
-                const links = Array.from(document.querySelectorAll('a')).map(a => a.href);
-                const websiteLink = links.find(link => 
-                    link.startsWith('http') && 
-                    !link.includes('instagram.com') && 
-                    !link.includes('facebook.com')
-                );
-                if (websiteLink) {
-                    data.website = websiteLink;
-                }
-
-                return data;
-            });
-
-            console.log('Extracted Data:', postData);
         } else {
             console.log('No posts found');
         }
