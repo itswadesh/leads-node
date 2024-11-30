@@ -5,10 +5,12 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "bun run index.js",
+    "serve": "bun run server.js"
   },
   "dependencies": {
     "puppeteer": "^21.5.2",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "hono": "^3.11.7"
   }
 }

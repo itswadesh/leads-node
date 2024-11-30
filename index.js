@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { setTimeout } from 'timers/promises';
 import fs from 'fs/promises';
 import path from 'path';
+import { initDB, savePost } from './db/index.js';
 
 dotenv.config();
 
@@ -76,6 +77,9 @@ async function login(page) {
 }
 
 async function scrapeInstagramPost() {
+    // Initialize database
+    await initDB();
+
     const browser = await puppeteer.launch({
         headless: false,
         defaultViewport: null,
@@ -159,7 +163,8 @@ async function scrapeInstagramPost() {
                     const data = {
                         email: '',
                         handle: '',
-                        website: ''
+                        website: '',
+                        postUrl: window.location.href
                     };
 
                     const postText = document.querySelector('article')?.textContent || '';
@@ -174,11 +179,32 @@ async function scrapeInstagramPost() {
                     }
 
                     const links = Array.from(document.querySelectorAll('a')).map(a => a.href);
-                    const websiteLink = links.find(link => 
-                        link.startsWith('http') && 
-                        !link.includes('instagram.com') && 
-                        !link.includes('facebook.com')
-                    );
+                    // List of social media and related domains to exclude
+                    const excludedDomains = [
+                        'instagram.com',
+                        'facebook.com',
+                        'threads.net',
+                        'meta.com',
+                        'about.meta.com',
+                        'twitter.com',
+                        'x.com',
+                        'linkedin.com',
+                        'tiktok.com',
+                        'youtube.com',
+                        'pinterest.com',
+                        'snapchat.com',
+                        'whatsapp.com',
+                        'messenger.com',
+                        'telegram.org',
+                        'discord.com',
+                        'reddit.com'
+                    ];
+                    
+                    const websiteLink = links.find(link => {
+                        if (!link.startsWith('http')) return false;
+                        return !excludedDomains.some(domain => link.toLowerCase().includes(domain));
+                    });
+                    
                     if (websiteLink) {
                         data.website = websiteLink;
                     }
@@ -187,6 +213,9 @@ async function scrapeInstagramPost() {
                 });
 
                 console.log('Extracted Data:', postData);
+                
+                // Save the extracted data to SQLite
+                await savePost(postData);
             } catch (error) {
                 console.error('Error occurred:', error);
             }
